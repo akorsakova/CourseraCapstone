@@ -1,0 +1,283 @@
+---
+title: "Exploratory Analysis of Text Data  for Swiftkey Capstone Project"
+author: "Anna Korsakova Bain"
+date: "December 29, 2015"
+output: html_document
+---
+
+In order to create a predictive text model for the Coursera Swiftkey project, I am working with a large corpus of documents obtained from publicly available data; more specifically blogs, Twitter, and news feeds. The raw data can be found here: <https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip>. 
+
+The goal of this milestone report is to demonstrate an understanding of the raw data as well as the ability to acquire and cleanse it. I will also outline the exploratory analysis that I have performed in order to understand the relationship and distribution within the types of data available in the corpora (i.e. words, tokens, and phrases).
+
+
+###Data Acquisition and Cleaning
+####Loading Libraries and Setting up the Environment
+```{r, results="hide", message=F, warning=F}
+  Sys.setenv(JAVA_HOME='C:\\Program Files\\Java\\jre1.8.0_66')
+  gc()
+  
+  library(tm)
+  library(wordcloud)
+  library(RWeka)
+  library(ggplot2)
+  library(dplyr)
+  library(stringi)
+
+  setwd("D:/DataScienceCertification/Capstone/final/en_US") 
+  set.seed(6384)
+  
+  sample_data1 <- vector(mode="character") 
+```
+
+####Creating Functions to be Used throughout the Program
+```{r}
+  #This function will read 10,000 lines from each of the 3 English files 
+  #and randomly select approximately 5k records from each, concatenating the three samples togehter
+  create_sample <- function(sd) { 
+    for (i in 1:10000) { 
+      if (rbinom(1, 1, 0.5)) 
+        sd <- c(sd, readLines(twitter_con, 1)) 
+    }
+    
+    for (i in 1:10000 ) {
+      if (rbinom(1, 1, 0.5))
+        sd <- c(sd, readLines(news_con, 1))
+    }
+    
+    
+    for (i in 1:10000 ) {
+      if (rbinom(1, 1, 0.5))
+        sd <- c(sd, readLines(blog_con, 1))
+    }
+    return(sd)
+  }
+  
+  #This function changes the encoding of our sample to ASCII as well load a 
+  #profanity list from Shutterstock and use it to clean our sample 
+  clean_data <- function(sd) { 
+    sd<-iconv(sd, to="ASCII", sub = "")
+    
+    profanity <- read.csv("ShutterStock.csv", stringsAsFactors = FALSE)
+    sd <- gsub(paste(profanity$word, collapse = "|"), "", sd, ignore.case=TRUE)
+    
+    return(sd)
+  }
+  
+  #This function tokenizes the sample data into a text corpus and further cleanses, removing numbers
+  #whitespace, capitalization, and multiple white spaces
+  tokenize_data <- function(sd) { 
+    text_corpus <- Corpus(VectorSource(sd), readerControl = list(language = "en")) 
+    
+    text_corpus <- tm_map(text_corpus, removeNumbers) 
+    text_corpus <- tm_map(text_corpus, removePunctuation) 
+    text_corpus <- tm_map(text_corpus , stripWhitespace) 
+    text_corpus <- tm_map(text_corpus, tolower) 
+    text_corpus <- tm_map(text_corpus, PlainTextDocument)
+    
+    return(text_corpus)
+  }
+  
+  #This function performs the same functionality as tokenize_data, with the exception of one 
+  #extra step - to remove stopwords
+  tokenize_data_rm_stopwords <- function(sd) { 
+    text_corpus <- Corpus(VectorSource(sd), readerControl = list(language = "en")) 
+    text_corpus <- tm_map(text_corpus, removeNumbers) 
+    text_corpus <- tm_map(text_corpus, removePunctuation) 
+    text_corpus <- tm_map(text_corpus , stripWhitespace) 
+    text_corpus <- tm_map(text_corpus, tolower) 
+    text_corpus <- tm_map(text_corpus, PlainTextDocument)
+    text_corpus <- tm_map(text_corpus, removeWords, stopwords("english"))   
+    
+    return(text_corpus)
+  }
+  
+  #This function creates a Document Term Matrix
+  create_termMatrix <- function(tc) { 
+    dtm <- DocumentTermMatrix(tc)
+    return(dtm)
+    }
+```
+####Gathering a Basic Understanding of the Data
+```{r, cache=TRUE, warning=F}
+  #Getting some info on the data files
+  blogs <- readLines("en_US.blogs.txt")
+  news <- readLines("en_US.news.txt")
+  twitter <- readLines("en_US.twitter.txt")
+  
+  #Size of each file
+  file.info("en_US.blogs.txt")$size / 1024^2
+  file.info("en_US.news.txt")$size / 1024^2
+  file.info("en_US.twitter.txt")$size / 1024^2
+  
+  #Length of each file
+  length(blogs)
+  length(news)
+  length(twitter)
+  
+  #Getting stats such as word counts
+  stri_stats_latex(blogs)
+  stri_stats_latex(news)
+  stri_stats_latex(twitter)
+  
+  #Longest entry
+  max(nchar(blogs))
+  max(nchar(news))
+  max(nchar(twitter))
+  
+  #Removing the large character vectors
+  rm(blogs)
+  rm(news)
+  rm(twitter)
+```  
+
+####Loading, Cleaning, and Tokenizing the Data
+```{r, cache=TRUE, warning=F}
+  #Setting up the connections
+  twitter_con <- file("en_US.twitter.txt", "r") 
+  news_con <- file("en_US.news.txt", "r") 
+  blog_con <- file("en_US.blogs.txt", "r")
+  
+  #Creating the sample dataset
+  sample_data1 <- create_sample(sample_data1)
+  
+  #Removing the connections
+  remove(blog_con) 
+  remove(twitter_con) 
+  remove(news_con)
+  
+  #Data cleaning
+  sample_data1 <- clean_data(sample_data1) 
+  
+  #Data tokenization
+  corp1 <- tokenize_data(sample_data1) 
+  corp1_wo_stopwords <- tokenize_data_rm_stopwords(sample_data1)
+
+  #Creation of the document term matrices
+  dtm1 <- create_termMatrix(corp1) 
+  dtm1_wo_stopwords <- create_termMatrix(corp1_wo_stopwords) 
+```
+
+###Exploratory Analysis
+####Some words are more frequent than others - what are the distributions of word frequencies? 
+
+In order to understand word frequencies, I decided to work with both sets of data created during my Data Acquisition and Cleaning phase: the corpus which includes stopwords and the corpus without stopwords.
+
+```{r, cache=TRUE, warning=F}
+  #Wordcloud graphs
+  layout(matrix(c(1, 2, 3, 4), nrow=2))
+  plot.new()
+  text(x=0.5, y=0.9, "Wordcloud with Stopwords")
+  plot.new()
+  text(x=0.5, y=0.9, "Wordcloud without Stopwords")
+  wordcloud(corp1, min.freq = 350, scale=c(5,0.5), random.order = FALSE, colors=brewer.pal(6, "Dark2"))    
+  wordcloud(corp1_wo_stopwords, min.freq = 150, scale=c(5,0.5), random.order = FALSE, colors=brewer.pal(6, "Paired")) 
+``` 
+  
+  
+####Top 20 Most Frequently Used Words
+```{r, cache=TRUE, warning=F}
+  #Find the most frequent words in the Document Text Matrix
+  termFreq <- sort(colSums(as.matrix(dtm1)), decreasing=TRUE) 
+  termFreq <-subset(termFreq, termFreq>=1250) 
+  
+  #Find the most frequent words in the Document Text Matrix - without Stopwords
+  termFreq_wo_stopwrods <- sort(colSums(as.matrix(dtm1_wo_stopwords)), decreasing=TRUE) 
+  termFreq_wo_stopwrods <-subset(termFreq_wo_stopwrods, termFreq_wo_stopwrods>=531) 
+  
+  one_word_df <- data.frame(word=names(termFreq), freq=termFreq)   
+  one_word_wo_stopwords_df <- data.frame(word=names(termFreq_wo_stopwrods), freq=termFreq_wo_stopwrods)   
+  
+  p <- ggplot(one_word_df, aes(reorder(word, freq), freq))    
+  p <- p + geom_bar(stat="identity", fill="lightgreen", colour="darkgreen")   
+  p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+  p <- p + labs(title = "Top 20 Words with Stopwords")
+  p <- p + ylab("Frequency")  + xlab("Word")
+  p
+  
+  q <- ggplot(one_word_wo_stopwords_df, aes(reorder(word, freq), freq))   
+  q <- q + geom_bar(stat="identity", fill="lightblue", colour="darkblue")      
+  q <- q + theme(axis.text.x=element_text(angle=45, hjust=1))   
+  q <- q + labs(title = "Top 20 Words without Stopwords")
+  q <- q + ylab("Frequency")  + xlab("Word")
+  q   
+```
+
+####What are the frequencies of 2-grams and 3-grams in the dataset? 
+```{r, cache=TRUE, warning=F}
+  #Time to create Ngrams
+  df<-data.frame(text=unlist(sapply(corp1, `[`, "content")), stringsAsFactors=F)
+  df_wo_stopwords<-data.frame(text=unlist(sapply(corp1_wo_stopwords, `[`, "content")), stringsAsFactors=F)
+  
+  #Creating 2 and 3-grams
+  two_ngram <- NGramTokenizer(df, Weka_control(min = 2, max = 2, delimiters = " \\r\\n\\t.,;:\"()?!"))
+  three_ngram <- NGramTokenizer(df, Weka_control(min = 3, max = 3, delimiters = " \\r\\n\\t.,;:\"()?!"))
+  
+  #Gathering the most frequently used ngrams
+  df_two <- as.data.frame(table(two_ngram))
+  df_two <- subset(arrange(df_two, desc(Freq)), Freq >= 340)
+  df_three <- as.data.frame(table(three_ngram))
+  df_three <- subset(arrange(df_three, desc(Freq)), Freq >= 46)
+
+  #plotting most frequently used words
+  p <- ggplot(df_two, aes(reorder(two_ngram, Freq), Freq))    
+  p <- p + geom_bar(stat="identity", fill="pink", colour="red")   
+  p <- p + theme(axis.text.x=element_text(angle=45, hjust=1))   
+  p <- p + labs(title = "Top 20 2-grams")
+  p <- p + ylab("Frequency")  + xlab("Word")
+  p
+  
+  q <- ggplot(df_three, aes(reorder(three_ngram, Freq), Freq))   
+  q <- q + geom_bar(stat="identity", fill="white", colour="purple")      
+  q <- q + theme(axis.text.x=element_text(angle=45, hjust=1))   
+  q <- q + labs(title = "Top 20 3-grams")
+  q <- q + ylab("Frequency")  + xlab("Word")
+  q     
+```
+
+####How many unique words do you need in a frequency sorted dictionary to cover 50% of all word instances in the language? 90%? 
+```{r, cache=TRUE, warning=F}
+  #Get the frequencies for each word
+  termFreq <- sort(colSums(as.matrix(dtm1)), decreasing=TRUE) 
+  one_word_freq <- data.frame(word=names(termFreq), freq=termFreq)   
+
+  #This function will assist us in getting the number of words needed 
+  #to get to the required percentage
+  get_num_words <- function(pct_needed) { 
+    i = 1
+    pct = 0
+    while (pct <= pct_needed){
+      pct = pct + (one_word_freq$freq[i]/sum(one_word_freq$freq) * 100)
+      i = i + 1
+    }
+    return(i)
+  }
+
+  #Create new dataframe with first row
+  df_perc_freq <- data.frame(get_num_words(10))
+  f <- 20
+  
+  while (f<100) {
+    df_perc_freq <- rbind(df_perc_freq, get_num_words(f))
+    f <- f+ 10
+  }
+  
+  df_perc_freq <- cbind(df_perc_freq, c(10,20,30,40,50,60,70,80,90))
+  colnames(df_perc_freq) <- c("numWords", "Pct")
+  
+  
+  q <- qplot(df_perc_freq$Pct,df_perc_freq$numWords, geom=c("line","point"))
+  q <- q <- q + labs(title = "Number of Unique Words Needed to Cover all Instances")
+  q <- q + ylab("Number of Words") + xlab("Percent") 
+  q <- q + scale_x_continuous(breaks=c(10,20,30,40,50,60,70,80,90))
+  q <- q + geom_text(aes(label=df_perc_freq$numWords), hjust=1, vjust=-1)
+  q
+```  
+
+####Interesting Findings
+There is a huge difference between the Document Term Matrix with stopwords and without. It will be interesting to see how a prediction model behaves using these two different sets of data.
+
+####How do you evaluate how many of the words come from foreign languages? 
+I think that by loading a well-known and used dictionary, we can eliminate foreign words as well as incorrectly typed words.
+
+####Can you think of a way to increase the coverage -- identifying words that may not be in the corpora or using a smaller number of words in the dictionary to cover the same number of phrases?
+I think one way to increase coverage and reduce the number of words in the dictionary is to first start prediction with the same dataset we have been using and overtime, adjust it to the user's dictionary. This way, words and phrases that the user does not use can be removed, and frequently used ones can be stored.

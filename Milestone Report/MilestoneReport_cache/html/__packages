@@ -1,0 +1,9 @@
+base
+NLP
+tm
+RColorBrewer
+wordcloud
+RWeka
+ggplot2
+dplyr
+stringi
